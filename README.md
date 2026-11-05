@@ -6,7 +6,7 @@ Clone this repository next to your service's `migrations` folder and run it loca
 
 ```text
 parent/
-  schema-linter/
+  sqlsniff/
   migrations/
     20241105_create_users.sql
 ```
