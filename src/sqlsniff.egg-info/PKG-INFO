@@ -1,0 +1,158 @@
+Metadata-Version: 2.4
+Name: sqlsniff
+Version: 1.0.0
+Summary: Lint MySQL schema migration files against database standards.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+
+# sqlSniff
+
+sqlSniff lints MySQL schema migration files against database standards that keep schemas portable and performant.
+
+Clone this repository next to your service's `migrations` folder and run it locally (or in CI) against those SQL files.
+
+```text
+parent/
+  schema-linter/
+  migrations/
+    20241105_create_users.sql
+```
+
+## Requirements
+
+- Python 3.10 or newer
+
+## Setup
+
+```bash
+cd schema-linter
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+## Usage
+
+From the `schema-linter` directory, the default target is `../migrations`:
+
+```bash
+sqlsniff
+```
+
+Or run the module without installing the console script:
+
+```bash
+python -m sqlsniff
+```
+
+Point at any migrations folder:
+
+```bash
+sqlsniff /path/to/migrations
+```
+
+### Skip old files
+
+Pass `--since MM-DD-YYYY` to skip `.sql` files whose last modified date is older than that day. This is the intended way to avoid relinting a large historical backlog:
+
+```bash
+sqlsniff --since 01-15-2024
+```
+
+A file last modified on `01-14-2024` is skipped; a file modified on `01-15-2024` or later is linted.
+
+### Automatic `-- ignore-lint` stamp
+
+When a migration file is linted and **passes**, sqlSniff prepends:
+
+```sql
+-- ignore-lint
+```
+
+Later runs skip any file whose first non-empty line is `-- ignore-lint`. Files that fail are **not** stamped, so they are linted again until they pass.
+
+To lint without writing that comment:
+
+```bash
+sqlsniff --no-stamp
+```
+
+### Optional path ignore file
+
+You can still exclude path patterns with a `.sqlsniffignore` file in the migrations folder (or pass `--ignore-file`). Each non-comment line is treated as a glob/substring match:
+
+```text
+# .sqlsniffignore
+*legacy*
+vendor/
+```
+
+### Useful flags
+
+```text
+sqlsniff [migrations_dir] [--since MM-DD-YYYY] [--ignore-file PATH] [--no-stamp] [--list-skipped]
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--since MM-DD-YYYY` | Skip files older than this last-modified date |
+| `--ignore-file PATH` | Extra ignore patterns |
+| `--no-stamp` | Do not write `-- ignore-lint` on passing files |
+| `--list-skipped` | Print skipped files and why they were skipped |
+
+Exit codes: `0` all linted files passed, `1` one or more rule violations, `2` usage or path error.
+
+## Rules
+
+All of the following fail the run. Existing sqlSniff checks are kept, and additional MySQL 8-oriented schema standards are included.
+
+| Rule | What it enforces |
+| --- | --- |
+| `NO_ENUM` | Do not use `ENUM` |
+| `NO_SET` | Do not use `SET` column types |
+| `ALLOWED_ENGINE` | Table engine must be InnoDB or MyRocks |
+| `REQUIRE_PRIMARY_KEY` | Every `CREATE TABLE` must declare a primary key |
+| `BIGINT_PRIMARY_KEY` | Integer primary keys must be `BIGINT` |
+| `AUTO_INCREMENT_UNSIGNED` | `AUTO_INCREMENT` integers must be `UNSIGNED` |
+| `AUTO_INCREMENT_BIGINT` | `AUTO_INCREMENT` integers must be `BIGINT UNSIGNED` |
+| `VARCHAR_WIDTH` | Avoid `VARCHAR` / `CHAR` widths of 255 or more |
+| `NO_JSON` | Avoid `JSON` columns |
+| `NO_TEXT` | Avoid `TEXT` / `MEDIUMTEXT` / `LONGTEXT` (`TINYTEXT` allowed) |
+| `NO_BLOB` | Avoid `BLOB` / `MEDIUMBLOB` / `LONGBLOB` (`TINYBLOB` allowed) |
+| `NO_FOREIGN_KEY` | Avoid `FOREIGN KEY` / `REFERENCES` |
+| `CREATE_VIEW` / `CREATE_TRIGGER` / `CREATE_FUNCTION` / `CREATE_PROCEDURE` / `CREATE_EVENT` | Avoid database routines; keep this logic in the application |
+| `CHARSET_UTF8MB4` | When a charset or collation is declared, use `utf8mb4` |
+| `NO_ZEROFILL` | `ZEROFILL` is deprecated in MySQL 8 |
+| `NO_INT_DISPLAY_WIDTH` | Integer display widths such as `INT(11)` are deprecated |
+| `PREFER_DECIMAL` | Do not use `FLOAT` / `DOUBLE` / `REAL` for exact values |
+| `NO_TIMESTAMP` | Prefer `DATETIME` over `TIMESTAMP` (Y2038) |
+
+A typical passing table looks like:
+
+```sql
+CREATE TABLE users (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  email VARCHAR(128) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+## CI
+
+Run the same command developers run locally. Example:
+
+```bash
+pip install -e ".[dev]"
+sqlsniff ../migrations --since 01-15-2024
+```
+
+There is no private container registry image to pull; this repo is meant to be cloned and executed as a Python tool.
