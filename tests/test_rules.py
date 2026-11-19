@@ -200,11 +200,12 @@ def test_alter_auto_increment_column_is_checked():
     assert lint_sql("ALTER TABLE t MODIFY id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;") == []
 
 
-def test_rocksdb_engine_allowed_and_engine_is_required():
+def test_rocksdb_engine_allowed_and_missing_engine_defaults_to_innodb():
     assert lint_sql(table("a BIGINT", "ENGINE=ROCKSDB DEFAULT CHARSET=utf8mb4")) == []
     assert "ALLOWED_ENGINE" in rule_ids(table("a BIGINT", "ENGINE = 'MyISAM'"))
     assert "ALLOWED_ENGINE" in rule_ids("ALTER TABLE t ENGINE=MyISAM;")
-    assert "REQUIRE_ENGINE" in rule_ids(table("a BIGINT", "DEFAULT CHARSET=utf8mb4"))
+    assert lint_sql(table("a BIGINT", "DEFAULT CHARSET=utf8mb4")) == []
+    assert lint_sql("CREATE TABLE t (id BIGINT UNSIGNED NOT NULL PRIMARY KEY);") == []
     assert lint_sql("CREATE TABLE copy LIKE original;") == []
 
 

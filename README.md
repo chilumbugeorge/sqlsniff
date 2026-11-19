@@ -106,8 +106,7 @@ Comments, string literals and data are ignored, so a word such as `text` inside 
 | `SYNTAX_ERROR` | SQL syntax mistakes (see below) |
 | `NO_ENUM` | Do not use `ENUM` |
 | `NO_SET` | Do not use `SET` column types |
-| `ALLOWED_ENGINE` | Table engine must be `InnoDB` or `ROCKSDB` (MyRocks) |
-| `REQUIRE_ENGINE` | Every `CREATE TABLE` must state its engine |
+| `ALLOWED_ENGINE` | Table engine must be `InnoDB` or `ROCKSDB` (MyRocks). A table with no `ENGINE` clause is assumed to be InnoDB, the MySQL/MariaDB default |
 | `REQUIRE_PRIMARY_KEY` | Every `CREATE TABLE`, including temporary tables, must declare a primary key |
 | `BIGINT_PRIMARY_KEY` | Integer primary keys must be `BIGINT` |
 | `AUTO_INCREMENT_UNSIGNED` | `AUTO_INCREMENT` integers must be `UNSIGNED` |

@@ -29,7 +29,6 @@ ENUM_MSG = (
     "Use a lookup table or VARCHAR with a constrained set of values instead."
 )
 ENGINE_MSG = "Only the InnoDB and RocksDB (MyRocks) table engines are allowed."
-REQUIRE_ENGINE_MSG = "declares no ENGINE. State the engine explicitly, for example ENGINE=InnoDB."
 FK_MSG = (
     "FOREIGN KEY constraints are not advised because they add overhead when constraints "
     "are evaluated. Enforce relationships in application code where possible."
@@ -283,20 +282,11 @@ def _named_values(context: Context, regex: re.Pattern[str], offset: int, text: s
 def rule_engine(context: Context) -> list[Violation]:
     violations: list[Violation] = []
     segments: list[tuple[int, str]] = []
+    # A table with no ENGINE clause uses the server default, which is InnoDB on
+    # MySQL and MariaDB, so it is treated as InnoDB and passes.
     for table in context.creates:
-        if not table.has_body:
-            continue
-        segments.append((table.options_offset, table.options))
-        if not ENGINE_RE.search(table.options):
-            violations.append(
-                _violation(
-                    context,
-                    "REQUIRE_ENGINE",
-                    f"Table `{table.name}` {REQUIRE_ENGINE_MSG}",
-                    Severity.ERROR,
-                    table.offset,
-                )
-            )
+        if table.has_body:
+            segments.append((table.options_offset, table.options))
     for alter in context.alters:
         segments.extend(spec for spec in alter.other_specs if ENGINE_RE.match(spec[1]))
     for offset, text in segments:
