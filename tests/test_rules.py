@@ -157,3 +157,102 @@ def test_comments_are_not_linted():
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     """
     assert lint_sql(sql) == []
+
+
+def table(column: str, options: str = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4") -> str:
+    return (
+        "CREATE TABLE t (\n"
+        "  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
+        f"  {column},\n"
+        "  PRIMARY KEY (id)\n"
+        f") {options};\n"
+    )
+
+
+def test_words_inside_strings_are_not_linted():
+    assert lint_sql(table("note VARCHAR(64) COMMENT 'free text, json, float; enum('")) == []
+    assert lint_sql(table("kind VARCHAR(16) NOT NULL DEFAULT 'timestamp'")) == []
+
+
+def test_data_statements_are_not_linted_for_types():
+    sql = """
+    INSERT INTO t (a, b) VALUES ('plain text, json, float, real', "it''s a blob");
+    UPDATE items SET type = 3, engine = 'MyISAM' WHERE id = 1;
+    DELETE FROM t WHERE kind = 'enum';
+    """
+    assert lint_sql(sql) == []
+
+
+def test_column_names_that_look_like_types_are_not_flagged():
+    assert lint_sql(table("created_timestamp DATETIME NOT NULL")) == []
+    assert lint_sql(table("`text` VARCHAR(32)")) == []
+    assert lint_sql(table("`timestamp` DATETIME, json_payload VARCHAR(64), `charset` VARCHAR(16)")) == []
+
+
+def test_auto_increment_table_option_is_not_flagged():
+    assert lint_sql("ALTER TABLE t AUTO_INCREMENT = 1000;") == []
+    assert lint_sql(table("a BIGINT", "ENGINE=InnoDB AUTO_INCREMENT=100 DEFAULT CHARSET=utf8mb4")) == []
+
+
+def test_alter_auto_increment_column_is_checked():
+    ids = rule_ids("ALTER TABLE t MODIFY COLUMN id INT NOT NULL AUTO_INCREMENT;")
+    assert {"AUTO_INCREMENT_UNSIGNED", "AUTO_INCREMENT_BIGINT"} <= ids
+    assert lint_sql("ALTER TABLE t MODIFY id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT;") == []
+
+
+def test_rocksdb_engine_allowed_and_engine_is_required():
+    assert lint_sql(table("a BIGINT", "ENGINE=ROCKSDB DEFAULT CHARSET=utf8mb4")) == []
+    assert "ALLOWED_ENGINE" in rule_ids(table("a BIGINT", "ENGINE = 'MyISAM'"))
+    assert "ALLOWED_ENGINE" in rule_ids("ALTER TABLE t ENGINE=MyISAM;")
+    assert "REQUIRE_ENGINE" in rule_ids(table("a BIGINT", "DEFAULT CHARSET=utf8mb4"))
+    assert lint_sql("CREATE TABLE copy LIKE original;") == []
+
+
+def test_tinyint_1_is_allowed_but_other_display_widths_are_not():
+    assert lint_sql(table("is_active TINYINT(1) NOT NULL DEFAULT 0")) == []
+    assert "NO_INT_DISPLAY_WIDTH" in rule_ids(table("n TINYINT(4)"))
+    assert "NO_INT_DISPLAY_WIDTH" in rule_ids(table("n BIGINT(20)"))
+    assert lint_sql(table("price DECIMAL(10,2) NOT NULL")) == []
+
+
+def test_temporary_tables_are_checked():
+    ids = rule_ids("CREATE TEMPORARY TABLE x (a INT AUTO_INCREMENT) ENGINE=InnoDB;")
+    assert {"REQUIRE_PRIMARY_KEY", "AUTO_INCREMENT_UNSIGNED", "AUTO_INCREMENT_BIGINT"} <= ids
+
+
+def test_parenthesis_inside_a_comment_string_does_not_hide_columns():
+    sql = table("a BIGINT COMMENT 'weird ) paren', b JSON")
+    assert rule_ids(sql) == {"NO_JSON"}
+
+
+def test_schema_qualified_and_quoted_table_names():
+    sql = "CREATE TABLE IF NOT EXISTS `app`.`users` (id INT PRIMARY KEY) ENGINE=InnoDB;"
+    violations = lint_sql(sql)
+    assert {v.rule_id for v in violations} == {"BIGINT_PRIMARY_KEY"}
+    assert "`users.id`" in violations[0].message
+
+
+def test_charset_rules_cover_columns_alter_and_database():
+    assert "CHARSET_UTF8MB4" in rule_ids(table("name VARCHAR(32) CHARACTER SET latin1"))
+    assert "CHARSET_UTF8MB4" in rule_ids(table("name VARCHAR(32) COLLATE utf8_general_ci"))
+    assert "CHARSET_UTF8MB4" in rule_ids("ALTER TABLE t CONVERT TO CHARACTER SET utf8;")
+    assert "CHARSET_UTF8MB4" in rule_ids("CREATE DATABASE app DEFAULT CHARACTER SET = 'latin1';")
+    assert lint_sql("CREATE DATABASE app CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;") == []
+
+
+def test_foreign_key_forms():
+    assert "NO_FOREIGN_KEY" in rule_ids(table("user_id BIGINT REFERENCES users (id)"))
+    assert "NO_FOREIGN_KEY" in rule_ids(table("user_id BIGINT, FOREIGN KEY (user_id) REFERENCES users (id)"))
+    assert lint_sql("ALTER TABLE orders DROP FOREIGN KEY fk_user;") == []
+
+
+def test_multi_column_alter_and_line_numbers():
+    sql = "ALTER TABLE t\n  ADD COLUMN (a TEXT,\n    b VARCHAR(300)),\n  CHANGE old_name new_name DOUBLE;\n"
+    found = {(v.line, v.rule_id) for v in lint_sql(sql)}
+    assert found == {(2, "NO_TEXT"), (3, "VARCHAR_WIDTH"), (4, "PREFER_DECIMAL")}
+
+
+def test_definer_views_and_delimiter_blocks():
+    assert "CREATE_VIEW" in rule_ids("CREATE DEFINER='root'@'localhost' SQL SECURITY DEFINER VIEW v AS SELECT 1;")
+    sql = "DELIMITER //\nCREATE PROCEDURE p()\nBEGIN\n  INSERT INTO t VALUES (1);\n  SELECT 1;\nEND//\nDELIMITER ;\n"
+    assert rule_ids(sql) == {"CREATE_PROCEDURE"}
