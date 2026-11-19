@@ -26,18 +26,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--since",
         metavar="MM-DD-YYYY",
-        help="Skip migration files whose last modified date is older than this date.",
+        help=(
+            "Skip migration files not changed since this date. Uses git commit history when "
+            "the folder is in a git repository, otherwise the file's last modified date."
+        ),
     )
     parser.add_argument(
         "--ignore-file",
         type=Path,
-        help="Optional .sqlsniffignore file with path patterns to skip.",
+        help="Extra file of path patterns to skip, in addition to .sqlsniffignore.",
     )
     parser.add_argument(
-        "--no-stamp",
+        "--stamp",
         action="store_true",
-        help="Do not write '-- ignore-lint' at the top of files that pass.",
+        help=(
+            "Write '-- ignore-lint sha256:...' at the top of files that pass, so later runs "
+            "skip them until they are edited. Off by default: this modifies migration files."
+        ),
     )
+    # Accepted for backwards compatibility; not stamping is now the default.
+    parser.add_argument("--no-stamp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--list-skipped",
         action="store_true",
@@ -46,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def format_result(result: LintResult, list_skipped: bool = False) -> str:
+def format_result(result: LintResult, list_skipped: bool = False, stamping: bool = False) -> str:
     lines: list[str] = []
     linted = [item for item in result.files if not item.skipped]
     skipped = [item for item in result.files if item.skipped]
@@ -62,14 +70,14 @@ def format_result(result: LintResult, list_skipped: bool = False) -> str:
 
     summary = (
         f"Linted {len(linted)} file(s), skipped {len(skipped)}, "
-        f"found {len(result.violations)} issue(s), stamped {len(stamped)} passing file(s)."
+        f"found {len(result.violations)} issue(s)"
     )
+    summary += f", stamped {len(stamped)} passing file(s)." if stamping else "."
     lines.append(summary)
     if not result.ok:
         lines.append(
-            "Fix the issues above, or add '-- ignore-lint' on its own first line only after "
-            "a DBA-approved exception. Files that pass are stamped automatically so later "
-            "runs skip them."
+            "Fix the issues above (errors and warnings both fail the run), or add "
+            "'-- ignore-lint' on its own first line only after a DBA-approved exception."
         )
     return "\n".join(lines)
 
@@ -86,19 +94,20 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 2
 
+    stamping = args.stamp and not args.no_stamp
     migrations_dir = Path(args.migrations_dir) if args.migrations_dir else default_migrations_dir()
     try:
         result = lint_migrations(
             migrations_dir=migrations_dir,
             since=since,
             ignore_file=args.ignore_file,
-            stamp_passing=not args.no_stamp,
+            stamp_passing=stamping,
         )
     except (FileNotFoundError, NotADirectoryError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    print(format_result(result, list_skipped=args.list_skipped))
+    print(format_result(result, list_skipped=args.list_skipped, stamping=stamping))
     return 0 if result.ok else 1
 
 

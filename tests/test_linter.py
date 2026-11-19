@@ -23,17 +23,17 @@ def test_passing_files_are_stamped(tmp_path: Path):
     path = tmp_path / "001_init.sql"
     path.write_text(CLEAN_SQL, encoding="utf-8")
 
-    result = lint_migrations(tmp_path)
+    result = lint_migrations(tmp_path, stamp_passing=True)
     assert result.ok
     assert result.files[0].stamped
-    assert path.read_text(encoding="utf-8").startswith("-- ignore-lint\n")
+    assert path.read_text(encoding="utf-8").startswith("-- ignore-lint sha256:")
 
 
 def test_failing_files_are_not_stamped(tmp_path: Path):
     path = tmp_path / "001_bad.sql"
     path.write_text(DIRTY_SQL, encoding="utf-8")
 
-    result = lint_migrations(tmp_path)
+    result = lint_migrations(tmp_path, stamp_passing=True)
     assert not result.ok
     assert not result.files[0].stamped
     assert not path.read_text(encoding="utf-8").startswith("-- ignore-lint")
@@ -52,11 +52,11 @@ def test_already_stamped_files_are_skipped(tmp_path: Path):
     assert result.files[0].skipped
 
 
-def test_no_stamp_flag(tmp_path: Path):
+def test_files_are_not_stamped_by_default(tmp_path: Path):
     path = tmp_path / "001_init.sql"
     path.write_text(CLEAN_SQL, encoding="utf-8")
 
-    result = lint_migrations(tmp_path, stamp_passing=False)
+    result = lint_migrations(tmp_path)
     assert result.ok
     assert not result.files[0].stamped
     assert "ignore-lint" not in path.read_text(encoding="utf-8")
