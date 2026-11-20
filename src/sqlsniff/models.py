@@ -56,7 +56,3 @@ class LintResult:
     @property
     def ok(self) -> bool:
         return not any(violation.blocking for _path, violation in self.violations)
-
-    @property
-    def has_errors(self) -> bool:
-        return any(violation.severity is Severity.ERROR for _path, violation in self.violations)

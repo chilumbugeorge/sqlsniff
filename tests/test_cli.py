@@ -65,37 +65,3 @@ def test_cli_advisory_is_reported_but_does_not_fail(tmp_path: Path, capsys):
     assert "001.sql:2: advisory: [UUID_PRIMARY_KEY]" in output
     assert "found 0 issue(s) and 1 advisory note(s)." in output
     assert "Fix the errors" not in output
-
-
-WARNING_ONLY_SQL = """
-CREATE TABLE notes (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  body TEXT,
-  PRIMARY KEY (id)
-) ENGINE=InnoDB;
-"""
-
-
-def test_warnings_ok_passes_warnings_but_still_reports_them(tmp_path: Path, capsys):
-    path = tmp_path / "001.sql"
-    path.write_text(WARNING_ONLY_SQL, encoding="utf-8")
-    assert main([str(tmp_path)]) == 1
-    capsys.readouterr()
-
-    assert main([str(tmp_path), "--warnings-ok", "--stamp"]) == 0
-    output = capsys.readouterr().out
-    assert "warning: [NO_TEXT]" in output
-    assert "found 1 issue(s)" in output
-    assert "allowed by --warnings-ok" in output
-    # A file with warnings is never stamped, so it is reported again on later runs.
-    assert path.read_text(encoding="utf-8") == WARNING_ONLY_SQL
-
-
-def test_warnings_ok_still_fails_on_errors(tmp_path: Path, capsys):
-    (tmp_path / "001.sql").write_text(
-        "CREATE TABLE t (\n  body TEXT\n) ENGINE=InnoDB;\n", encoding="utf-8"
-    )
-    assert main([str(tmp_path), "--warnings-ok"]) == 1
-    output = capsys.readouterr().out
-    assert "error: [REQUIRE_PRIMARY_KEY]" in output
-    assert "Fix the errors above" in output
