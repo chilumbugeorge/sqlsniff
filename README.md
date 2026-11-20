@@ -145,6 +145,7 @@ CREATE TABLE users (
 - `CREATE TABLE` with no name, no column list or no columns
 - a stray or trailing comma, or a missing comma between column definitions
 - a column with no data type or an unknown data type (`VARCHRA`)
+- a misspelt column attribute (`NOT NUL`, `AUTO_INCREMNT`) or table option (`ENGIN=InnoDB`), with a suggested correction
 - duplicate column names, more than one primary key, or a primary key on a column that does not exist
 
 These are structural checks, not a full MySQL grammar. A file that passes can still be rejected by MySQL for reasons sqlSniff does not model, such as an unknown table or a misspelt keyword inside an expression. Run migrations against a real MySQL instance before release.

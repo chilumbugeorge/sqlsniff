@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -135,6 +136,37 @@ SECOND_TYPE_RE = re.compile(
     r"longblob|json|float|double|boolean|bool|enum)\b",
     re.IGNORECASE,
 )
+
+# Words that may follow the data type in a column definition.
+COLUMN_ATTRIBUTE_WORDS = {
+    "not", "null", "default", "auto_increment", "unique", "primary", "key", "comment",
+    "collate", "character", "charset", "set", "unsigned", "signed", "zerofill", "binary",
+    "ascii", "unicode", "byte", "generated", "always", "as", "virtual", "stored", "persistent",
+    "on", "update", "visible", "invisible", "column_format", "fixed", "dynamic", "storage",
+    "disk", "memory", "references", "check", "constraint", "enforced", "srid", "first", "after",
+    "serial", "value", "for", "engine_attribute", "secondary_engine_attribute", "secondary",
+    "compressed", "with", "without", "system", "versioning",
+}  # fmt: skip
+# After these words comes a free-form value (a name, literal or function), not a keyword.
+VALUE_FOLLOWS = {
+    "default", "collate", "set", "charset", "after", "update", "srid", "column_format",
+    "storage", "for", "constraint",
+}  # fmt: skip
+TABLE_OPTION_WORDS = {
+    "engine", "auto_increment", "autoextend_size", "avg_row_length", "charset", "checksum",
+    "collate", "comment", "compression", "connection", "delay_key_write", "encryption",
+    "engine_attribute", "insert_method", "key_block_size", "max_rows", "min_rows", "pack_keys",
+    "password", "row_format", "secondary_engine_attribute", "stats_auto_recalc",
+    "stats_persistent", "stats_sample_pages", "tablespace", "storage", "union",
+    # MariaDB
+    "encrypted", "encryption_key_id", "ietf_quotes", "page_checksum", "page_compressed",
+    "page_compression_level", "sequence", "transactional",
+}  # fmt: skip
+TABLE_OPTION_PAIRS = {"character": "set", "data": "directory", "index": "directory", "start": "transaction"}
+TABLE_OPTION_STOP = {"partition", "as", "select", "ignore", "replace", "with"}
+WORD_RE = re.compile(r"\b[A-Za-z_][\w$]*\b")
+QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+OPTION_VALUE_RE = re.compile(r"\s*=?\s*(?:'[^']*'|\"[^\"]*\"|\([^)]*\)|[\w$.\-]+)?")
 
 STATEMENT_KEYWORDS = {
     "alter", "analyze", "begin", "call", "check", "commit", "create", "deallocate", "delete",
@@ -427,6 +459,80 @@ def _syntax(context: Context, offset: int, message: str) -> Violation:
     return _violation(context, "SYNTAX_ERROR", message, Severity.ERROR, offset)
 
 
+def _suggestion(word: str, candidates: set[str]) -> str:
+    close = difflib.get_close_matches(word.lower(), sorted(candidates), n=1, cutoff=0.6)
+    return f" Did you mean `{close[0].upper()}`?" if close else ""
+
+
+def _blank_strings(text: str) -> str:
+    return QUOTED_RE.sub(lambda match: " " * len(match.group(0)), text)
+
+
+def _attribute_syntax(context: Context, column: ColumnDef, type_end: int) -> list[Violation]:
+    """Every bare word after the data type must be a known column attribute keyword."""
+    flat = flatten(column.tail)
+    bare = _blank_strings(flat)
+    previous = ""
+    previous_end = type_end
+    for match in WORD_RE.finditer(bare, type_end):
+        word = match.group(0).lower()
+        if flat[match.end() : match.end() + 1] in ("'", '"'):
+            previous, previous_end = "", match.end()  # literal prefix: b'0', x'1F', _utf8mb4'..'
+            continue
+        gap = column.tail[previous_end : match.start()].strip()
+        is_value = previous in VALUE_FOLLOWS and gap in ("", "=", "+", "-")
+        if is_value and not (previous == "constraint" and word == "check"):
+            previous, previous_end = "", match.end()
+            continue
+        if word == "references":
+            break  # table name and referential actions follow
+        if word not in COLUMN_ATTRIBUTE_WORDS:
+            return [
+                _syntax(
+                    context,
+                    column.tail_offset + match.start(),
+                    f"Unexpected `{match.group(0).upper()}` in the definition of column "
+                    f"`{column.name}`.{_suggestion(word, COLUMN_ATTRIBUTE_WORDS)}",
+                )
+            ]
+        previous, previous_end = word, match.end()
+    return []
+
+
+def _table_option_syntax(context: Context, table: CreateTable) -> list[Violation]:
+    """Table options are `NAME [=] value` pairs; flag an unknown option name."""
+    text = _blank_strings(table.options)
+    position = 0
+    while True:
+        match = WORD_RE.search(text, position)
+        if not match or text[position : match.start()].strip(" \t\r\n,"):
+            return []  # nothing left, or something this check does not model
+        word = match.group(0).lower()
+        position = match.end()
+        if word in TABLE_OPTION_STOP:
+            return []
+        if word == "default":
+            continue
+        if word in TABLE_OPTION_PAIRS:
+            follower = re.compile(r"\s*([A-Za-z_]+)").match(text, position)
+            if not follower or follower.group(1).lower() != TABLE_OPTION_PAIRS[word]:
+                return []
+            position = follower.end()
+            if word == "start":
+                continue
+        elif word not in TABLE_OPTION_WORDS:
+            candidates = TABLE_OPTION_WORDS | set(TABLE_OPTION_PAIRS) | {"default"}
+            return [
+                _syntax(
+                    context,
+                    table.options_offset + match.start(),
+                    f"Unknown table option `{match.group(0).upper()}` for table "
+                    f"`{table.name}`.{_suggestion(word, candidates)}",
+                )
+            ]
+        position = OPTION_VALUE_RE.match(table.options, position).end()
+
+
 def _column_syntax(context: Context, column: ColumnDef) -> list[Violation]:
     if not column.type_name:
         return [_syntax(context, column.offset, f"Column `{column.name}` has no data type.")]
@@ -450,7 +556,7 @@ def _column_syntax(context: Context, column: ColumnDef) -> list[Violation]:
                 f"`{column.name}` - a comma is probably missing.",
             )
         ]
-    return []
+    return _attribute_syntax(context, column, type_end)
 
 
 def _create_table_syntax(context: Context, table: CreateTable) -> list[Violation]:
@@ -492,6 +598,7 @@ def _create_table_syntax(context: Context, table: CreateTable) -> list[Violation
             for name in names
             if name not in seen
         )
+    violations.extend(_table_option_syntax(context, table))
     return violations
 
 

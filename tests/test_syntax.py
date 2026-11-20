@@ -96,6 +96,90 @@ def test_table_definition_syntax_errors(sql: str, line: int, fragment: str):
     assert any(found_line == line and fragment in message for found_line, message in errors), errors
 
 
+def test_misspelt_column_attribute_is_reported():
+    sql = (
+        "create table tb1(\n"
+        "    id bigint unsigned not null auto_increment,\n"
+        "    first varchar(128) not nul,\n"
+        "    primary key(id)\n"
+        ");\n"
+    )
+    violations = lint_sql(sql)
+    assert [(v.line, v.rule_id) for v in violations] == [(3, "SYNTAX_ERROR")]
+    assert violations[0].message == (
+        "Unexpected `NUL` in the definition of column `first`. Did you mean `NULL`?"
+    )
+
+
+@pytest.mark.parametrize(
+    ("column", "fragment"),
+    [
+        ("a BIGINT NOT NULL AUTO_INCREMNT", "Unexpected `AUTO_INCREMNT`"),
+        ("a BIGINT UNSIGND NOT NULL", "Unexpected `UNSIGND`"),
+        ("a VARCHAR(32) NOT NULL DEFALT 'x'", "Unexpected `DEFALT`"),
+        ("a VARCHAR(32) NULL COMENT 'note'", "Unexpected `COMENT`"),
+        ("a DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ONUPDATE CURRENT_TIMESTAMP", "Unexpected `ONUPDATE`"),
+        ("a BIGINT NOT NULL PRIMRY KEY", "Unexpected `PRIMRY`"),
+    ],
+)
+def test_misspelt_column_attributes(column: str, fragment: str):
+    errors = syntax_errors(body("  id BIGINT UNSIGNED PRIMARY KEY,", f"  {column}"))
+    assert len(errors) == 1 and errors[0][0] == 3 and fragment in errors[0][1], errors
+    errors = syntax_errors(f"ALTER TABLE t ADD COLUMN {column};")
+    assert len(errors) == 1 and fragment in errors[0][1], errors
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        "a VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT 'not nul'",
+        "a BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'nul defalt'",
+        "a DECIMAL(10,2) NOT NULL DEFAULT -1.5",
+        "a BIT(1) NOT NULL DEFAULT b'0'",
+        "a DATETIME(6) NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP(6)",
+        "a DATETIME NOT NULL DEFAULT NOW()",
+        "a BIGINT GENERATED ALWAYS AS (id + 1) STORED NOT NULL",
+        "a BIGINT AS (id * 2) VIRTUAL INVISIBLE",
+        "a VARCHAR(16) NOT NULL DEFAULT (UUID()) CHECK (a <> 'nul') NOT ENFORCED",
+        "a BIGINT CONSTRAINT chk_a CHECK (a > 0)",
+        "a BIGINT UNSIGNED NOT NULL UNIQUE KEY COLUMN_FORMAT FIXED STORAGE DISK",
+        "a VARCHAR(8) COLLATE utf8mb4_bin DEFAULT _utf8mb4'x'",
+    ],
+)
+def test_valid_column_attributes_are_accepted(column: str):
+    assert syntax_errors(body("  id BIGINT UNSIGNED PRIMARY KEY,", f"  {column}")) == []
+
+
+def test_alter_column_position_keywords_are_accepted():
+    assert lint_sql("ALTER TABLE t ADD COLUMN a BIGINT NOT NULL FIRST, MODIFY b BIGINT NULL AFTER a;") == []
+
+
+@pytest.mark.parametrize(
+    ("options", "fragment"),
+    [
+        ("ENGIN=InnoDB", "Unknown table option `ENGIN` for table `t`. Did you mean `ENGINE`?"),
+        ("ENGINE=InnoDB DEFAULT CHARST=utf8mb4", "Unknown table option `CHARST`"),
+        ("ENGINE=InnoDB ROW_FORMT=DYNAMIC", "Unknown table option `ROW_FORMT`"),
+    ],
+)
+def test_misspelt_table_options(options: str, fragment: str):
+    errors = syntax_errors(f"CREATE TABLE t (\n  id BIGINT UNSIGNED PRIMARY KEY\n) {options};")
+    assert len(errors) == 1 and errors[0][0] == 3 and fragment in errors[0][1], errors
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        "",
+        "ENGINE = InnoDB, DEFAULT CHARACTER SET = utf8mb4 COLLATE = utf8mb4_bin",
+        "ENGINE=InnoDB AUTO_INCREMENT=5 ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=8 COMMENT='engin charst'",
+        "ENGINE=InnoDB STATS_PERSISTENT=1 DATA DIRECTORY='/x' TABLESPACE ts1 PARTITION BY KEY (id) PARTITIONS 2",
+    ],
+)
+def test_valid_table_options_are_accepted(options: str):
+    assert lint_sql(f"CREATE TABLE t (\n  id BIGINT UNSIGNED PRIMARY KEY\n) {options};") == []
+
+
 def test_missing_semicolon_between_statements():
     sql = "CREATE TABLE a (id BIGINT UNSIGNED PRIMARY KEY) ENGINE=InnoDB\nCREATE TABLE b (id BIGINT UNSIGNED PRIMARY KEY) ENGINE=InnoDB;\n"
     assert (2, "`CREATE TABLE` begins inside another statement - a ';' is probably missing before it.") in syntax_errors(sql)
