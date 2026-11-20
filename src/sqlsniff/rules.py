@@ -78,6 +78,15 @@ FLOAT_MSG = (
     "FLOAT and DOUBLE are approximate types and are not suitable for exact values such as "
     "money. Use DECIMAL with an explicit precision and scale."
 )
+UUID_PK_MSG = (
+    "is a UUID stored as text. Random UUIDs scatter inserts across the clustered index "
+    "(page splits, fragmentation), and a 36-character key is copied into every secondary "
+    "index. Alternatives: (1) BIGINT UNSIGNED AUTO_INCREMENT, giving each node its own "
+    "auto_increment_offset with a shared auto_increment_increment so ids never collide when "
+    "data from several nodes is merged; (2) if a UUID is required, store it time-ordered in "
+    "16 bytes: BINARY(16) DEFAULT (UUID_TO_BIN(UUID(), 1)) on MySQL 8, or the UUID column "
+    "type on MariaDB 10.7+."
+)
 TIMESTAMP_MSG = (
     "TIMESTAMP is limited to 1970-2038 (the Y2038 problem). Prefer DATETIME for values that "
     "must remain valid beyond 2038."
@@ -123,7 +132,7 @@ KNOWN_TYPES = (
         "decimal", "dec", "numeric", "fixed",
         "date", "datetime", "timestamp", "time", "year",
         "binary", "varbinary", "tinyblob", "tinytext", "long",
-        "enum", "set", "json", "vector",
+        "enum", "set", "json", "vector", "uuid", "inet4", "inet6",
         "geometry", "point", "linestring", "polygon", "multipoint",
         "multilinestring", "multipolygon", "geometrycollection", "geomcollection",
     }
@@ -435,6 +444,29 @@ def rule_bigint_primary_keys(context: Context) -> list[Violation]:
     return violations
 
 
+def rule_uuid_primary_key(context: Context) -> list[Violation]:
+    """Advisory: a primary key that holds a UUID as CHAR/VARCHAR text."""
+    violations: list[Violation] = []
+    for table in context.creates:
+        pk_names = _primary_key_columns(table)
+        for column in table.columns:
+            if column.name not in pk_names or column.type_name not in CHAR_TYPES:
+                continue
+            uuid_width = column.type_args in ("32", "36")
+            uuid_default = re.search(r"\buuid(?:_v[47])?\s*\(", column.tail, re.IGNORECASE)
+            if uuid_width or uuid_default:
+                violations.append(
+                    _violation(
+                        context,
+                        "UUID_PRIMARY_KEY",
+                        f"Primary key `{table.name}.{column.name}` {UUID_PK_MSG}",
+                        Severity.ADVISORY,
+                        column.offset,
+                    )
+                )
+    return violations
+
+
 def rule_auto_increment(context: Context) -> list[Violation]:
     violations: list[Violation] = []
     for column in context.columns:
@@ -691,6 +723,7 @@ RULES: list[RuleFn] = [
     rule_timestamp,
     rule_primary_keys,
     rule_bigint_primary_keys,
+    rule_uuid_primary_key,
     rule_auto_increment,
 ]
 

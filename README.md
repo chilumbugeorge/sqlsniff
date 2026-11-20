@@ -93,11 +93,11 @@ sqlsniff [migrations_dir] [--since MM-DD-YYYY] [--ignore-file PATH] [--stamp] [-
 | `--stamp` | Write `-- ignore-lint sha256:...` on passing files |
 | `--list-skipped` | Print skipped files and why they were skipped |
 
-Exit codes: `0` all linted files passed, `1` one or more violations, `2` usage or path error (including a missing `--ignore-file`).
+Exit codes: `0` all linted files passed (advisory notes allowed), `1` one or more errors or warnings, `2` usage or path error (including a missing `--ignore-file`).
 
 ## Rules
 
-All of the following fail the run, whether reported as `error` or `warning`; the label only indicates how serious the finding is.
+Findings have three levels. `error` and `warning` both fail the run. `advisory` is printed with a recommendation but never fails the run.
 
 Comments, string literals and data are ignored, so a word such as `text` inside a `COMMENT`, a default value or an `INSERT` is never flagged. Type rules apply to column definitions in `CREATE TABLE` and `ALTER TABLE ... ADD / MODIFY / CHANGE`.
 
@@ -109,6 +109,7 @@ Comments, string literals and data are ignored, so a word such as `text` inside 
 | `ALLOWED_ENGINE` | Table engine must be `InnoDB` or `ROCKSDB` (MyRocks). A table with no `ENGINE` clause is assumed to be InnoDB, the MySQL/MariaDB default |
 | `REQUIRE_PRIMARY_KEY` | Every `CREATE TABLE`, including temporary tables, must declare a primary key |
 | `BIGINT_PRIMARY_KEY` | Integer primary keys must be `BIGINT` |
+| `UUID_PRIMARY_KEY` (advisory) | A primary key holding a UUID as `CHAR`/`VARCHAR` text; suggests node-offset `AUTO_INCREMENT` or a time-ordered 16-byte UUID |
 | `AUTO_INCREMENT_UNSIGNED` | `AUTO_INCREMENT` integers must be `UNSIGNED` |
 | `AUTO_INCREMENT_BIGINT` | `AUTO_INCREMENT` integers must be `BIGINT UNSIGNED` |
 | `VARCHAR_WIDTH` | Avoid `VARCHAR` / `CHAR` widths of 255 or more |

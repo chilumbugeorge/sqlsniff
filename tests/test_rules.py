@@ -257,3 +257,28 @@ def test_definer_views_and_delimiter_blocks():
     assert "CREATE_VIEW" in rule_ids("CREATE DEFINER='root'@'localhost' SQL SECURITY DEFINER VIEW v AS SELECT 1;")
     sql = "DELIMITER //\nCREATE PROCEDURE p()\nBEGIN\n  INSERT INTO t VALUES (1);\n  SELECT 1;\nEND//\nDELIMITER ;\n"
     assert rule_ids(sql) == {"CREATE_PROCEDURE"}
+
+
+UUID_TABLE = """
+CREATE TABLE users (
+    id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    username VARCHAR(50) NOT NULL
+);
+"""
+
+
+def test_text_uuid_primary_key_is_an_advisory():
+    violations = lint_sql(UUID_TABLE)
+    assert [(v.line, v.rule_id, v.severity.value) for v in violations] == [(3, "UUID_PRIMARY_KEY", "advisory")]
+    assert "auto_increment_offset" in violations[0].message
+    assert "UUID_TO_BIN(UUID(), 1)" in violations[0].message
+
+
+def test_uuid_primary_key_detection_boundaries():
+    assert "UUID_PRIMARY_KEY" in rule_ids(table("code VARCHAR(36) NOT NULL").replace("PRIMARY KEY (id)", "PRIMARY KEY (code)"))
+    assert "UUID_PRIMARY_KEY" in rule_ids("CREATE TABLE t (id VARCHAR(64) NOT NULL DEFAULT (uuid()), PRIMARY KEY (id));")
+    # A UUID that is not the primary key, a compact binary UUID, and MariaDB's UUID type are fine.
+    assert lint_sql(table("external_id CHAR(36) NOT NULL")) == []
+    assert lint_sql("CREATE TABLE t (id BINARY(16) PRIMARY KEY DEFAULT (UUID_TO_BIN(UUID(), 1)));") == []
+    assert lint_sql("CREATE TABLE t (id UUID PRIMARY KEY DEFAULT UUID());") == []
+    assert lint_sql("CREATE TABLE t (code CHAR(8) PRIMARY KEY);") == []

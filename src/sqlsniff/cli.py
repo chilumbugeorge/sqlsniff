@@ -68,15 +68,19 @@ def format_result(result: LintResult, list_skipped: bool = False, stamping: bool
         for file_result in skipped:
             lines.append(f"{file_result.path}: skipped ({file_result.skip_reason})")
 
+    blocking = [violation for _path, violation in result.violations if violation.blocking]
+    advisories = len(result.violations) - len(blocking)
     summary = (
         f"Linted {len(linted)} file(s), skipped {len(skipped)}, "
-        f"found {len(result.violations)} issue(s)"
+        f"found {len(blocking)} issue(s)"
     )
+    if advisories:
+        summary += f" and {advisories} advisory note(s)"
     summary += f", stamped {len(stamped)} passing file(s)." if stamping else "."
     lines.append(summary)
     if not result.ok:
         lines.append(
-            "Fix the issues above (errors and warnings both fail the run), or add "
+            "Fix the errors and warnings above (advisory notes do not fail the run), or add "
             "'-- ignore-lint' on its own first line only after a DBA-approved exception."
         )
     return "\n".join(lines)

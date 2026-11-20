@@ -8,6 +8,7 @@ from pathlib import Path
 class Severity(str, Enum):
     ERROR = "error"
     WARNING = "warning"
+    ADVISORY = "advisory"  # reported, but never fails the run
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,10 @@ class Violation:
     message: str
     severity: Severity
     line: int | None = None
+
+    @property
+    def blocking(self) -> bool:
+        return self.severity is not Severity.ADVISORY
 
     def format(self, path: Path) -> str:
         location = f"{path}:{self.line}" if self.line is not None else str(path)
@@ -32,7 +37,7 @@ class FileResult:
 
     @property
     def ok(self) -> bool:
-        return self.skipped or not self.violations
+        return self.skipped or not any(violation.blocking for violation in self.violations)
 
 
 @dataclass
@@ -50,4 +55,4 @@ class LintResult:
 
     @property
     def ok(self) -> bool:
-        return not self.violations
+        return not any(violation.blocking for _path, violation in self.violations)

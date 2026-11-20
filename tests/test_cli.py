@@ -53,3 +53,15 @@ def test_cli_syntax_error_fails_the_run(tmp_path: Path, capsys):
     (tmp_path / "001.sql").write_text("CREAT TABLE t (id BIGINT);", encoding="utf-8")
     assert main([str(tmp_path)]) == 1
     assert "[SYNTAX_ERROR]" in capsys.readouterr().out
+
+
+def test_cli_advisory_is_reported_but_does_not_fail(tmp_path: Path, capsys):
+    (tmp_path / "001.sql").write_text(
+        "CREATE TABLE users (\n  id CHAR(36) PRIMARY KEY DEFAULT (UUID()),\n  username VARCHAR(50) NOT NULL\n);\n",
+        encoding="utf-8",
+    )
+    assert main([str(tmp_path)]) == 0
+    output = capsys.readouterr().out
+    assert "001.sql:2: advisory: [UUID_PRIMARY_KEY]" in output
+    assert "found 0 issue(s) and 1 advisory note(s)." in output
+    assert "Fix the errors" not in output
