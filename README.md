@@ -97,7 +97,25 @@ Exit codes: `0` all linted files passed (advisory notes allowed), `1` one or mor
 
 ## Rules
 
-Findings have three levels. `error` and `warning` both fail the run. `advisory` is printed with a recommendation but never fails the run.
+### Severity levels
+
+Every finding is reported at one of three levels, shown in the output as `file:line: level: [RULE] message`.
+
+| Level | Meaning | Fails the run |
+| --- | --- | --- |
+| `error` | The SQL is invalid or breaks a mandatory standard | Yes |
+| `warning` | A discouraged feature that needs a DBA-approved exception | Yes |
+| `advisory` | A design recommendation with a suggested alternative | No |
+
+| Level | Rules |
+| --- | --- |
+| `error` | `SYNTAX_ERROR`, `ALLOWED_ENGINE`, `CHARSET_UTF8MB4`, `NO_ZEROFILL`, `REQUIRE_PRIMARY_KEY`, `BIGINT_PRIMARY_KEY`, `AUTO_INCREMENT_UNSIGNED`, `AUTO_INCREMENT_BIGINT` |
+| `warning` | `NO_ENUM`, `NO_SET`, `NO_JSON`, `NO_TEXT`, `NO_BLOB`, `VARCHAR_WIDTH`, `NO_FOREIGN_KEY`, `NO_INT_DISPLAY_WIDTH`, `PREFER_DECIMAL`, `NO_TIMESTAMP`, `CREATE_VIEW`, `CREATE_TRIGGER`, `CREATE_FUNCTION`, `CREATE_PROCEDURE`, `CREATE_EVENT` |
+| `advisory` | `UUID_PRIMARY_KEY` |
+
+The summary line counts errors and warnings as issues and advisory notes separately, for example `found 0 issue(s) and 1 advisory note(s)`. A file with only advisory notes passes: the exit code is `0`, and with `--stamp` the file is stamped.
+
+### What each rule checks
 
 Comments, string literals and data are ignored, so a word such as `text` inside a `COMMENT`, a default value or an `INSERT` is never flagged. Type rules apply to column definitions in `CREATE TABLE` and `ALTER TABLE ... ADD / MODIFY / CHANGE`.
 
