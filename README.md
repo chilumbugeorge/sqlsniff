@@ -83,7 +83,7 @@ vendor/
 ### Useful flags
 
 ```text
-sqlsniff [migrations_dir] [--since MM-DD-YYYY] [--ignore-file PATH] [--stamp] [--list-skipped]
+sqlsniff [migrations_dir] [--since MM-DD-YYYY] [--ignore-file PATH] [--stamp] [--warnings-ok] [--list-skipped]
 ```
 
 | Flag | Meaning |
@@ -91,9 +91,10 @@ sqlsniff [migrations_dir] [--since MM-DD-YYYY] [--ignore-file PATH] [--stamp] [-
 | `--since MM-DD-YYYY` | Skip files not changed since this date |
 | `--ignore-file PATH` | Extra ignore patterns, in addition to `.sqlsniffignore` |
 | `--stamp` | Write `-- ignore-lint sha256:...` on passing files |
+| `--warnings-ok` | Report warnings without failing the run; only errors fail |
 | `--list-skipped` | Print skipped files and why they were skipped |
 
-Exit codes: `0` all linted files passed (advisory notes allowed), `1` one or more errors or warnings, `2` usage or path error (including a missing `--ignore-file`).
+Exit codes: `0` all linted files passed (advisory notes allowed), `1` one or more errors or warnings (errors only with `--warnings-ok`), `2` usage or path error (including a missing `--ignore-file`).
 
 ## Rules
 
@@ -187,5 +188,37 @@ sqlsniff ../migrations --since 01-15-2024
 ```
 
 Check out full git history in CI so `--since` can see commit dates (see "Skip old files").
+
+### Recommended GitHub Actions setup
+
+Add this workflow to the repository that holds the migrations, as `.github/workflows/sqlsniff.yml`. Adjust `migrations` to the path of your migrations folder.
+
+```yaml
+name: sqlsniff
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install git+https://github.com/chilumbugeorge/sqlsniff
+      - run: >
+          sqlsniff migrations
+          ${{ contains(github.event.pull_request.labels.*.name, '--warnings-ok') && '--warnings-ok' || '' }}
+```
+
+### Allowing warnings on a pull request
+
+By default a pull request fails on any error or warning. To let an approved exception through:
+
+1. Create a label named `--warnings-ok` in that repository (Pull requests > Labels > New label).
+2. Add the label to the pull request. The check re-runs and passes `--warnings-ok` to sqlSniff.
+
+With the label, warnings are still printed but no longer fail the check. Errors always fail, and advisory notes never do. A file with warnings is not stamped by `--stamp`, so its warnings are reported again on later runs. Anyone who can label pull requests can grant this exception, so limit that permission accordingly.
 
 There is no private container registry image to pull; this repo is meant to be cloned and executed as a Python tool.

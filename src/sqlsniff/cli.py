@@ -47,6 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     # Accepted for backwards compatibility; not stamping is now the default.
     parser.add_argument("--no-stamp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
+        "--warnings-ok",
+        action="store_true",
+        help=(
+            "Report warnings without failing the run; only errors give exit code 1. "
+            "Intended for an approved exception, such as a labelled pull request."
+        ),
+    )
+    parser.add_argument(
         "--list-skipped",
         action="store_true",
         help="Print skipped files and the reason they were skipped.",
@@ -54,7 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def format_result(result: LintResult, list_skipped: bool = False, stamping: bool = False) -> str:
+def format_result(
+    result: LintResult,
+    list_skipped: bool = False,
+    stamping: bool = False,
+    warnings_ok: bool = False,
+) -> str:
     lines: list[str] = []
     linted = [item for item in result.files if not item.skipped]
     skipped = [item for item in result.files if item.skipped]
@@ -78,9 +91,12 @@ def format_result(result: LintResult, list_skipped: bool = False, stamping: bool
         summary += f" and {advisories} advisory note(s)"
     summary += f", stamped {len(stamped)} passing file(s)." if stamping else "."
     lines.append(summary)
-    if not result.ok:
+    if warnings_ok and not result.ok and not result.has_errors:
+        lines.append("Warnings were reported but allowed by --warnings-ok; the run passes.")
+    elif not result.ok:
+        what = "errors" if warnings_ok else "errors and warnings"
         lines.append(
-            "Fix the errors and warnings above (advisory notes do not fail the run), or add "
+            f"Fix the {what} above (advisory notes do not fail the run), or add "
             "'-- ignore-lint' on its own first line only after a DBA-approved exception."
         )
     return "\n".join(lines)
@@ -111,7 +127,16 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
 
-    print(format_result(result, list_skipped=args.list_skipped, stamping=stamping))
+    print(
+        format_result(
+            result,
+            list_skipped=args.list_skipped,
+            stamping=stamping,
+            warnings_ok=args.warnings_ok,
+        )
+    )
+    if args.warnings_ok:
+        return 1 if result.has_errors else 0
     return 0 if result.ok else 1
 
 
